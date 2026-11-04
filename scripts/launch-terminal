@@ -1,0 +1,3 @@
+#!/bin/sh
+orbit_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd) || exit 1
+exec /usr/bin/cosmic-term --working-directory "$orbit_dir" -e "$orbit_dir/orbit"

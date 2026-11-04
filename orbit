@@ -1,0 +1,7 @@
+#!/bin/sh
+orbit_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 1
+if [ ! -x "$orbit_dir/.venv/bin/python" ]; then
+    echo 'Falta .venv. Crea el entorno e instala requirements.txt según README.md.' >&2
+    exit 1
+fi
+exec "$orbit_dir/.venv/bin/python" "$orbit_dir/app.py" "$@"
