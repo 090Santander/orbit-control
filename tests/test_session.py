@@ -7,6 +7,12 @@ import app
 
 
 class SessionTests(unittest.TestCase):
+    def setUp(self):
+        keeper = Mock(alive=True, error='')
+        self.keeper_patch = patch.object(app, 'ConnectionKeeper', return_value=keeper)
+        self.keeper_patch.start()
+        self.addCleanup(self.keeper_patch.stop)
+
     def test_reuses_existing_token_and_remembers_successful_port(self):
         with tempfile.TemporaryDirectory() as folder, patch.object(app, 'ROOT', Path(folder)):
             tokens = Path(folder) / '.data' / 'tokens'

@@ -102,6 +102,14 @@ La terminal lee entradas cada 20 ms y mantiene hasta ocho órdenes pendientes, c
 
 Se midieron tres envíos con la biblioteca Samsung real y un socket simulado: aproximadamente 3,00 s con su pausa original y 0,24 s con la nueva configuración. La respuesta física depende del televisor y de la red.
 
+### Mantener la conexión durante la inactividad
+
+Samsung mantiene un receptor WebSocket en segundo plano: atiende los ping del televisor y envía un ping cada 20 segundos, sin simular pulsaciones del mando. Si no recibe el pong esperado en 15 segundos, detecta que se perdió el canal.
+
+En el mando de terminal, después de una conexión correcta y con un token local, se intenta reconectar automáticamente tras un corte. Los reintentos usan esperas progresivas de hasta 30 segundos y se detienen al salir con Q. Un rechazo explícito de autorización detiene los reintentos. Las teclas pendientes se descartan al perder la conexión y no se reproducen al reconectar.
+
+El cierre voluntario ocurre al salir del mando o desconectar desde la web. Un TV apagado, una pérdida de red o un permiso revocado pueden cerrar la conexión desde fuera de ORBIT. Mantener el canal no impide que el televisor active su suspensión normal.
+
 ### Otros modos
 
 ```sh
@@ -176,7 +184,7 @@ Conserva una copia privada de `.data/` si reinstalas. Los tokens, las bases loca
 | TShark informa permisos insuficientes | Configura los permisos de captura de Wireshark para tu usuario desde el sistema. ORBIT no eleva privilegios. |
 | Samsung vuelve a pedir permiso | Acepta ORBIT Remoto y revisa los ajustes de acceso del TV. Comprueba que sigues conservando `.data/`. |
 | Un botón Roku falla | Verifica el acceso por aplicaciones y que el modelo admita esa tecla. |
-| El canal se desconecta | Pulsa `R`. Los comandos fallidos no se repiten automáticamente. |
+| El canal se desconecta | El mando Samsung intenta reconectar si había una sesión autorizada y un token. `R` permite reintentar manualmente. Los comandos fallidos no se repiten. |
 | LG aparece pero no abre un mando | El adaptador de control LG todavía está pendiente. |
 
 Un envío completado no confirma por sí solo un cambio físico en la pantalla. Al salir, la aplicación puede esperar a que termine una solicitud de conexión en curso.

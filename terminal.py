@@ -61,6 +61,9 @@ def launch(ip=None, brand='samsung', title='TV2000', on_connected=None):
         log_offset = 0
         latency = None
         operation_started = time.monotonic()
+        retry_at = None
+        retry_count = 0
+        ever_connected = False
         log('Conectando con autorización guardada. Revisa el TV si solicita permiso.')
         bindings = {curses.KEY_UP: 'Arriba', curses.KEY_DOWN: 'Abajo',
                     curses.KEY_LEFT: 'Izquierda', curses.KEY_RIGHT: 'Derecha',
@@ -74,6 +77,9 @@ def launch(ip=None, brand='samsung', title='TV2000', on_connected=None):
                 try:
                     future.result()
                     if operation == 'Conectar':
+                        ever_connected = True
+                        retry_at = None
+                        retry_count = 0
                         log('Canal Samsung autorizado y guardado.' if brand == 'samsung' else 'Roku identificado. El acceso se comprueba al enviar controles.')
                     else:
                         sent += 1
@@ -83,7 +89,24 @@ def launch(ip=None, brand='samsung', title='TV2000', on_connected=None):
                     pending.clear()
                     log('ERROR: ' + str(exc))
                     log('Cola cancelada. No se repetirán comandos al reconectar.')
+                    if brand == 'samsung' and ever_connected and (ROOT / '.data' / 'tokens' / f'{target}.token').exists() and 'unauthorized' not in str(exc).casefold():
+                        retry_count += 1
+                        retry_at = time.monotonic() + min(30, 2 ** min(retry_count, 5))
+                        log('Reconexión automática programada; Q para salir.')
+                    else:
+                        retry_at = None
                 future = None
+            if brand == 'samsung' and future is None:
+                if tv.remote and not tv.is_connected():
+                    reason = tv.keeper.error if tv.keeper else 'Canal cerrado'
+                    pending.clear()
+                    tv.disconnect()
+                    retry_at = time.monotonic() + 2 if (ROOT / '.data' / 'tokens' / f'{target}.token').exists() else None
+                    log('Canal perdido: ' + reason + ' · reconectando sin repetir órdenes.')
+                if not tv.remote and retry_at is not None and time.monotonic() >= retry_at:
+                    retry_at = None
+                    operation = 'Conectar'
+                    future = pool.submit(connect)
             if future is None and tv.remote and not log_view:
                 expired_before = pending.expired
                 next_action = pending.pop()
@@ -118,7 +141,7 @@ def launch(ip=None, brand='samsung', title='TV2000', on_connected=None):
                 hits.append((y, x, x + w, action))
             put(0, ' ' * (width - 1), color('title'), 0)
             put(0, ' ORBIT  /  CONTROL REMOTO', color('title') | curses.A_BOLD)
-            state = 'CONECTANDO' if future and operation == 'Conectar' else 'ENVIANDO' if future else 'CANAL ABIERTO' if tv.remote and brand == 'samsung' else 'ROKU IDENTIFICADO' if tv.remote else 'DESCONECTADO'
+            state = 'CONECTANDO' if future and operation == 'Conectar' else 'ENVIANDO' if future else 'CANAL ABIERTO' if tv.remote and brand == 'samsung' else 'ROKU IDENTIFICADO' if tv.remote else f'REINTENTO EN {max(0, int(retry_at - time.monotonic()))} s' if retry_at is not None else 'DESCONECTADO'
             put(2, title, curses.A_BOLD | color('accent'))
             put(3, f'{state}  ·  {tv.host or target or "buscando TV2000"}', color('ok') if tv.remote else color('accent'))
             token = ROOT / '.data' / 'tokens' / f'{tv.host or target}.token'
@@ -208,6 +231,7 @@ def launch(ip=None, brand='samsung', title='TV2000', on_connected=None):
                     pass
             if key in (ord('r'), ord('R')) and future is None:
                 pending.clear()
+                retry_at = None
                 operation = 'Conectar'
                 future = pool.submit(connect)
                 log('Reconectando…')

@@ -9,6 +9,7 @@ import secrets
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from keepalive import ConnectionKeeper
 from concurrent.futures import ThreadPoolExecutor
 from urllib.request import build_opener, ProxyHandler
 
@@ -91,12 +92,19 @@ class Television:
     def __init__(self):
         self.remote = None
         self.host = ''
+        self.keeper = None
         self.key_delay = 0.08
         self.lock = threading.Lock()
 
     def disconnect(self):
         remote, self.remote = self.remote, None
         self.host = ''
+        keeper, self.keeper = self.keeper, None
+        if keeper:
+            try:
+                keeper.stop()
+            except Exception:
+                pass
         if remote:
             try:
                 remote.close()
@@ -122,14 +130,21 @@ class Television:
         ports = (8001, 8002) if saved.get('ip') == host and saved.get('port') == 8001 else (8002, 8001)
         for port in ports:
             remote = SamsungTVWS(host=host, port=port, name='ORBIT Remoto', token_file=str(token_file), timeout=10 if token_file.exists() else 30)
+            keeper = None
             try:
                 remote.open()
                 if token_file.exists():
                     token_file.chmod(0o600)
+                keeper = ConnectionKeeper(remote.connection)
+                if not keeper.alive:
+                    raise ConnectionError(keeper.error or 'Canal cerrado durante la conexión.')
                 save_tv(host, port)
+                self.keeper = keeper
                 self.remote, self.host = remote, host
                 return
             except Exception as exc:
+                if keeper:
+                    keeper.stop()
                 try:
                     remote.close()
                 except Exception:
@@ -137,11 +152,15 @@ class Television:
                 errors.append(f'Puerto {port}: {type(exc).__name__}: {exc}')
         raise RuntimeError('No se abrió el canal de control. Enciende el TV, comprueba la IP y acepta ORBIT Remoto en pantalla. ' + ' | '.join(errors))
 
+    def is_connected(self):
+        return self.remote is not None and self.keeper is not None and self.keeper.alive
+
     def send(self, label):
         if label not in KEYS:
             raise ValueError('Control desconocido.')
-        if not self.remote:
-            raise ValueError('Solicita conexión primero.')
+        if not self.is_connected():
+            self.disconnect()
+            raise ValueError('El canal está cerrado. Reutiliza el token al reconectar.')
         try:
             self.remote.send_key(KEYS[label], key_press_delay=self.key_delay)
         except Exception as exc:
@@ -203,9 +222,9 @@ def make_server(port):
                     message = 'Canal cerrado.'
                 else:
                     return self.respond(404, {'error': 'Operación desconocida.'})
-                self.respond(200, {'message': message, 'connected': tv.remote is not None, 'ip': tv.host})
+                self.respond(200, {'message': message, 'connected': tv.is_connected(), 'ip': tv.host})
             except Exception as exc:
-                self.respond(400, {'error': str(exc), 'connected': tv.remote is not None, 'ip': tv.host})
+                self.respond(400, {'error': str(exc), 'connected': tv.is_connected(), 'ip': tv.host})
             finally:
                 tv.lock.release()
 
