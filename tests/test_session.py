@@ -27,7 +27,7 @@ class SessionTests(unittest.TestCase):
                 self.assertEqual(app.saved_tv(), {'ip': '192.168.1.16', 'port': 8002})
                 self.assertEqual(token.stat().st_mode & 0o777, 0o600)
                 self.assertEqual((Path(folder) / '.data' / 'tv.json').stat().st_mode & 0o777, 0o600)
-                remote.send_key.assert_called_once_with('KEY_VOLUP')
+                remote.send_key.assert_called_once_with('KEY_VOLUP', key_press_delay=0.08)
 
     def test_rejected_connection_does_not_replace_saved_tv(self):
         with tempfile.TemporaryDirectory() as folder, patch.object(app, 'ROOT', Path(folder)):

@@ -91,6 +91,7 @@ class Television:
     def __init__(self):
         self.remote = None
         self.host = ''
+        self.key_delay = 0.08
         self.lock = threading.Lock()
 
     def disconnect(self):
@@ -142,7 +143,7 @@ class Television:
         if not self.remote:
             raise ValueError('Solicita conexión primero.')
         try:
-            self.remote.send_key(KEYS[label])
+            self.remote.send_key(KEYS[label], key_press_delay=self.key_delay)
         except Exception as exc:
             self.disconnect()
             raise RuntimeError('Falló el envío. Vuelve a solicitar conexión. No se ha repetido el comando automáticamente.') from exc

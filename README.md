@@ -87,9 +87,20 @@ Puedes pegar direcciones IP y rutas en los formularios. `Ctrl+U` limpia un campo
 | Espacio | Reproducir / pausar |
 | `R` | Reconectar |
 | `T` | Activar o desactivar clics del ratón |
+| `V` | Cambiar ritmo Samsung: 80, 150 o 300 ms |
+| `C` | Cancelar órdenes pendientes; el envío actual termina |
+| `L` | Ver historial completo; flechas desplazan y L/Esc vuelve |
 | `Q` | Volver al inventario |
 
 A partir de **78 columnas × 26 filas**, el mando muestra cruceta, botones y paneles de sesión y actividad. En tamaños menores utiliza una vista compacta. Los clics están desactivados inicialmente para permitir seleccionar y copiar texto en la terminal.
+
+### Respuesta del mando
+
+El envío Samsung usa una pausa de **80 ms por tecla**, frente al segundo predeterminado de la biblioteca. `V` permite elegir 150 o 300 ms para modelos que necesiten más separación. Este ajuste se aplica a la sesión actual; el inicio utiliza 80 ms.
+
+La terminal lee entradas cada 20 ms y mantiene hasta ocho órdenes pendientes, conservando su orden. Las que esperan más de dos segundos caducan. `C` cancela pendientes; un error vacía la cola para evitar reproducir acciones al reconectar. El historial muestra la duración de envío local, no el tiempo de respuesta física del TV.
+
+Se midieron tres envíos con la biblioteca Samsung real y un socket simulado: aproximadamente 3,00 s con su pausa original y 0,24 s con la nueva configuración. La respuesta física depende del televisor y de la red.
 
 ### Otros modos
 

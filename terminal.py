@@ -1,6 +1,8 @@
 """Daily terminal remote, sharing the web adapter and authorization tokens."""
 import curses
 import time
+import textwrap
+from control_queue import CommandQueue
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from app import Television, saved_tv, private_ip, find_named_tv, ROOT
@@ -46,7 +48,7 @@ def launch(ip=None, brand='samsung', title='TV2000', on_connected=None):
             return colors.get(name, 0)
         mouse = False
         flash_until = 0
-        screen.timeout(100)
+        screen.timeout(20)
         screen.keypad(True)
         events = deque(maxlen=100)
         def log(text):
@@ -54,6 +56,11 @@ def launch(ip=None, brand='samsung', title='TV2000', on_connected=None):
         future = pool.submit(connect)
         operation = 'Conectar'
         sent = 0
+        pending = CommandQueue()
+        log_view = False
+        log_offset = 0
+        latency = None
+        operation_started = time.monotonic()
         log('Conectando con autorización guardada. Revisa el TV si solicita permiso.')
         bindings = {curses.KEY_UP: 'Arriba', curses.KEY_DOWN: 'Abajo',
                     curses.KEY_LEFT: 'Izquierda', curses.KEY_RIGHT: 'Derecha',
@@ -70,10 +77,23 @@ def launch(ip=None, brand='samsung', title='TV2000', on_connected=None):
                         log('Canal Samsung autorizado y guardado.' if brand == 'samsung' else 'Roku identificado. El acceso se comprueba al enviar controles.')
                     else:
                         sent += 1
-                        log(operation + ' · enviado')
+                        latency = round((time.monotonic() - operation_started) * 1000)
+                        log(operation + f' · enviado en {latency} ms')
                 except Exception as exc:
+                    pending.clear()
                     log('ERROR: ' + str(exc))
+                    log('Cola cancelada. No se repetirán comandos al reconectar.')
                 future = None
+            if future is None and tv.remote and not log_view:
+                expired_before = pending.expired
+                next_action = pending.pop()
+                if pending.expired > expired_before:
+                    log(f'{pending.expired - expired_before} órdenes antiguas descartadas.')
+                if next_action:
+                    operation = next_action
+                    flash_until = time.monotonic() + .25
+                    operation_started = time.monotonic()
+                    future = pool.submit(tv.send, operation)
             screen.erase()
             height, width = screen.getmaxyx()
             def put(y, text, style=0, x=1, limit=None):
@@ -98,7 +118,7 @@ def launch(ip=None, brand='samsung', title='TV2000', on_connected=None):
                 hits.append((y, x, x + w, action))
             put(0, ' ' * (width - 1), color('title'), 0)
             put(0, ' ORBIT  /  CONTROL REMOTO', color('title') | curses.A_BOLD)
-            state = 'CONECTANDO' if future and operation == 'Conectar' else 'ENVIANDO' if future else 'CANAL AUTORIZADO' if tv.remote and brand == 'samsung' else 'ROKU IDENTIFICADO' if tv.remote else 'DESCONECTADO'
+            state = 'CONECTANDO' if future and operation == 'Conectar' else 'ENVIANDO' if future else 'CANAL ABIERTO' if tv.remote and brand == 'samsung' else 'ROKU IDENTIFICADO' if tv.remote else 'DESCONECTADO'
             put(2, title, curses.A_BOLD | color('accent'))
             put(3, f'{state}  ·  {tv.host or target or "buscando TV2000"}', color('ok') if tv.remote else color('accent'))
             token = ROOT / '.data' / 'tokens' / f'{tv.host or target}.token'
@@ -124,8 +144,9 @@ def launch(ip=None, brand='samsung', title='TV2000', on_connected=None):
                 panel_width = width - x - 2
                 box(5, x, panel_width, 7, 'SESIÓN')
                 put(7, permission, color('accent'), x + 2, panel_width - 4)
-                put(8, f'Comandos enviados: {sent}', 0, x + 2, panel_width - 4)
-                put(9, 'Ratón: ' + ('clics activos' if mouse else 'selección de texto'), 0, x + 2, panel_width - 4)
+                put(8, f'Envíos: {sent} · Ritmo: {round(tv.key_delay * 1000)} ms' if brand == 'samsung' else f'Comandos enviados: {sent}', 0, x + 2, panel_width - 4)
+                put(9, f'Cola: {len(pending)}/8  ·  Último envío: {str(latency) + " ms" if latency is not None else "—"}', 0, x + 2, panel_width - 4)
+                put(10, 'Ratón: ' + ('clics activos' if mouse else 'selección de texto'), 0, x + 2, panel_width - 4)
                 box(13, x, panel_width, 11, 'ACTIVIDAD')
                 for row, event in enumerate(list(events)[-8:], 15):
                     put(row, event, color('error') if 'ERROR:' in event else 0, x + 2, panel_width - 4)
@@ -137,11 +158,43 @@ def launch(ip=None, brand='samsung', title='TV2000', on_connected=None):
                 capacity = max(0, height - 14)
                 for row, event in enumerate(list(events)[-capacity:] if capacity else [], 11):
                     put(row, event, color('error') if 'ERROR:' in event else 0)
-            put(height - 2, ' Q volver al inventario   R reconectar   T activar/desactivar clics ', color('title') | curses.A_BOLD)
+            if log_view:
+                screen.erase()
+                put(0, 'ORBIT / HISTORIAL COMPLETO', color('title') | curses.A_BOLD)
+                lines = [line for event in events for line in textwrap.wrap(event, max(10, width - 4))]
+                capacity = max(1, height - 5)
+                log_offset = min(log_offset, max(0, len(lines) - capacity))
+                end = max(0, len(lines) - log_offset)
+                for row, line in enumerate(lines[max(0, end - capacity):end], 2):
+                    put(row, line)
+                put(height - 2, '↑↓ desplazar · L/Esc volver al mando · Q salir', color('title') | curses.A_BOLD)
+            else:
+                put(height - 2, 'Q volver  R conectar  T ratón  L historial  C cancelar  V ritmo', color('title') | curses.A_BOLD)
             screen.refresh()
             key = screen.getch()
             if key in (ord('q'), ord('Q')):
                 return
+            if key in (ord('l'), ord('L')) or (key == 27 and log_view):
+                log_view = not log_view
+                pending.clear()
+                continue
+            if log_view:
+                if key == curses.KEY_UP:
+                    log_offset += 1
+                elif key == curses.KEY_DOWN:
+                    log_offset = max(0, log_offset - 1)
+                continue
+            if key in (ord('v'), ord('V')):
+                if brand == 'samsung' and future is None:
+                    values = (0.08, 0.15, 0.3)
+                    tv.key_delay = values[(values.index(tv.key_delay) + 1) % len(values)]
+                    log(f'Separación entre teclas: {round(tv.key_delay * 1000)} ms')
+                elif future:
+                    log('Espera a que termine el envío para cambiar el ritmo.')
+                continue
+            if key in (ord('c'), ord('C')):
+                log(f'{pending.clear()} órdenes pendientes canceladas; el envío en curso termina.')
+                continue
             action = bindings.get(key)
             if key in (ord('t'), ord('T')):
                 mouse = not mouse
@@ -154,16 +207,16 @@ def launch(ip=None, brand='samsung', title='TV2000', on_connected=None):
                 except curses.error:
                     pass
             if key in (ord('r'), ord('R')) and future is None:
+                pending.clear()
                 operation = 'Conectar'
                 future = pool.submit(connect)
                 log('Reconectando…')
-            elif action and future is None:
+            elif action:
                 if tv.remote is None:
                     log('Sin conexión. Pulsa R para reintentar.')
                 else:
-                    operation = action
-                    flash_until = time.monotonic() + .25
-                    future = pool.submit(tv.send, operation)
+                    if not pending.push(action):
+                        log('Cola llena: pulsación descartada. C cancela las pendientes.')
     try:
         curses.wrapper(draw)
     except curses.error as exc:
